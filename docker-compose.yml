@@ -1,0 +1,24 @@
+services:
+  # Production build served by nginx.
+  web:
+    build:
+      context: .
+      target: runtime
+    image: sf-metadata-kg-builder:latest
+    container_name: sf-metadata-kg-builder
+    ports:
+      - "8080:80"
+    restart: unless-stopped
+
+  # Optional hot-reload dev server.
+  # Run with: docker compose --profile dev up dev
+  dev:
+    image: node:22-alpine
+    working_dir: /app
+    profiles: ["dev"]
+    command: sh -c "npm install --no-audit --no-fund && npm run dev"
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./:/app
+      - /app/node_modules
