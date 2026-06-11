@@ -86,7 +86,7 @@ export const PIPELINE_STAGES: PipelineStageDef[] = [
     primaryOutput: "graph_nodes.json + graph_edges.json",
     route: "/graph",
     icon: Network,
-    implemented: false,
+    implemented: true,
   },
   {
     number: 6,
