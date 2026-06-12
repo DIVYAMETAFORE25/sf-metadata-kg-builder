@@ -36,6 +36,41 @@ records for:
 All parsing runs locally in the browser — no metadata leaves the machine.
 Results can be exported as `parsed_metadata.json` for the next stage.
 
+## Hybrid knowledge graph (rules + LLM)
+
+The knowledge graph (Stage 5) is built in two layers:
+
+1. **Ontology rule engine** (`src/lib/graph/builder.ts`) — deterministic. Creates
+   typed nodes and explicit/structural edges (`HAS_FIELD`, `REFERENCES`,
+   `RECORD_TYPE_OF`, `GRANTS_ACCESS`) at full confidence, plus rule-inferred
+   business edges (`AUTOMATES`, `OPERATES_ON`) from names/keywords/triggers.
+2. **LLM enrichment** (optional) — on demand, the graph is sent to a backend
+   proxy that calls OpenAI to score the candidate business edges and propose new
+   ones (`BUSINESS_RELATED`). Results are merged back:
+   - edges both the rules and the LLM agree on become **hybrid** and their
+     confidence is boosted via a noisy-OR combination;
+   - LLM-only edges are added at the model's (capped) confidence;
+   - rule edges the LLM didn't mention are kept (graceful fallback).
+
+Every edge carries a **confidence score** and a **source** (explicit, structural,
+rule-inferred, LLM, or hybrid), both visualised on the graph (line colour/weight)
+and in the node inspector (confidence bar + rationale).
+
+### Configuring the OpenAI key
+
+The key is held **server-side** and is never exposed to the browser.
+
+```bash
+cp .env.example .env        # then edit .env
+# .env
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4o
+```
+
+When no key is configured the app still works — it just shows the rules-only
+graph and the "Enhance with AI" button is disabled. Check Settings in the app to
+confirm the key was detected.
+
 ## Tech stack
 
 - React 18 + TypeScript + Vite 6
@@ -60,12 +95,27 @@ npm run preview    # preview the production build
 npm run typecheck  # TypeScript type checking
 ```
 
-## Docker
+## Local development (with LLM)
 
-Build and run the production image (served by nginx):
+The frontend and the enrichment API run as two processes. Vite proxies `/api`
+to the API on port 8787.
 
 ```bash
-docker compose up --build         # http://localhost:8080
+# Terminal 1 — API (reads ../.env)
+cd server && npm install && npm start
+
+# Terminal 2 — frontend
+npm install && npm run dev          # http://localhost:5173
+```
+
+## Docker
+
+`docker compose` runs both the nginx-served frontend and the API. nginx proxies
+`/api/*` to the `api` service, which reads `OPENAI_API_KEY` from the root `.env`.
+
+```bash
+cp .env.example .env                # add your OPENAI_API_KEY
+docker compose up --build           # http://localhost:8080
 ```
 
 Run the hot-reload dev server in a container instead:
@@ -74,9 +124,9 @@ Run the hot-reload dev server in a container instead:
 docker compose --profile dev up dev   # http://localhost:5173
 ```
 
-Or with plain Docker:
+Services:
 
-```bash
-docker build -t sf-metadata-kg-builder .
-docker run --rm -p 8080:80 sf-metadata-kg-builder
-```
+| Service | URL | Purpose |
+|---|---|---|
+| `web` | http://localhost:8080 | Static frontend (nginx) + `/api` proxy |
+| `api` | http://localhost:8787 | OpenAI enrichment proxy |

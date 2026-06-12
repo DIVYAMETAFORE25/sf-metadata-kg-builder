@@ -17,7 +17,7 @@ import {
   type WheelEvent as ReactWheelEvent,
 } from "react";
 import type { GraphEdge, GraphNode } from "@/lib/graph";
-import { NODE_TYPES } from "@/lib/graph";
+import { NODE_TYPES, DERIVATION_STYLES } from "@/lib/graph";
 import { useForceLayout } from "./useForceLayout";
 
 interface GraphCanvasProps {
@@ -243,7 +243,7 @@ export default function GraphCanvas({
               edge.target !== activeId;
             const mx = (a.x + b.x) / 2;
             const my = (a.y + b.y) / 2;
-            const inferred = edge.derivation === "inferred";
+            const style = DERIVATION_STYLES[edge.derivation];
             // Only label edges connected to the active node, to avoid clutter.
             const showLabel =
               activeId !== null &&
@@ -251,16 +251,22 @@ export default function GraphCanvas({
             const highlighted =
               activeId !== null &&
               (edge.source === activeId || edge.target === activeId);
+            // Stronger/wider lines for higher-confidence relationships.
+            const width = 0.9 + edge.confidence * 2.4 + (highlighted ? 0.8 : 0);
+            const baseOpacity = 0.35 + edge.confidence * 0.55;
             return (
-              <g key={edge.id} opacity={dimmed ? 0.06 : 1}>
+              <g
+                key={edge.id}
+                opacity={dimmed ? 0.06 : highlighted ? 1 : baseOpacity}
+              >
                 <line
                   x1={a.x}
                   y1={a.y}
                   x2={b.x}
                   y2={b.y}
-                  stroke={highlighted ? "#475569" : "#cbd5e1"}
-                  strokeWidth={highlighted ? 2 : 1.25}
-                  strokeDasharray={inferred ? "5 4" : undefined}
+                  stroke={style?.color ?? "#cbd5e1"}
+                  strokeWidth={width}
+                  strokeDasharray={style?.dashed ? "5 4" : undefined}
                   markerEnd={`url(#arrow-${NODE_TYPES.Object.id})`}
                 />
                 {showLabel && (
@@ -274,7 +280,7 @@ export default function GraphCanvas({
                     fontWeight={600}
                     fill="#475569"
                   >
-                    {edge.caption}
+                    {edge.caption} · {Math.round(edge.confidence * 100)}%
                   </text>
                 )}
               </g>

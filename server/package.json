@@ -1,0 +1,17 @@
+{
+  "name": "sf-metadata-kg-builder-api",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "LLM enrichment proxy for the Metafore knowledge graph builder. Keeps the OpenAI API key server-side.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1"
+  }
+}

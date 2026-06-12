@@ -1,5 +1,5 @@
 services:
-  # Production build served by nginx.
+  # Production build served by nginx. Proxies /api/* to the api service.
   web:
     build:
       context: .
@@ -8,6 +8,26 @@ services:
     container_name: sf-metadata-kg-builder
     ports:
       - "8080:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  # LLM enrichment proxy. Holds the provider keys server-side (from root .env).
+  api:
+    build:
+      context: ./server
+    image: sf-metadata-kg-builder-api:latest
+    container_name: sf-metadata-kg-builder-api
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-opus-4-8}
+      - PORT=8787
+    expose:
+      - "8787"
+    ports:
+      - "8787:8787"
     restart: unless-stopped
 
   # Optional hot-reload dev server.

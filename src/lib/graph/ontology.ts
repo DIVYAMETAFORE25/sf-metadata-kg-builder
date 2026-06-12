@@ -10,7 +10,7 @@
  * future validator all read from one source of truth.
  */
 
-import type { EdgeTypeId, NodeTypeId } from "./types";
+import type { Derivation, EdgeTypeId, NodeTypeId } from "./types";
 
 export interface NodeTypeDef {
   id: NodeTypeId;
@@ -31,7 +31,7 @@ export interface EdgeTypeDef {
   from: NodeTypeId[];
   to: NodeTypeId[];
   /** How the builder derives this edge. */
-  derivation: "explicit" | "structural" | "inferred";
+  derivation: Derivation;
   /** Default confidence when the edge is created from an explicit source. */
   baseConfidence: number;
   color: string;
@@ -102,7 +102,42 @@ export const EDGE_TYPES: Record<EdgeTypeId, EdgeTypeDef> = {
     baseConfidence: 1,
     color: "#ef4444",
   },
+  BUSINESS_RELATED: {
+    id: "BUSINESS_RELATED",
+    label: "BUSINESS_RELATED",
+    from: ["Object"],
+    to: ["Object"],
+    derivation: "llm",
+    baseConfidence: 0.6,
+    color: "#7c3aed",
+  },
 };
+
+/** Visual style for each derivation source, used by the canvas + legend. */
+export interface DerivationStyle {
+  id: "explicit" | "structural" | "inferred" | "llm" | "hybrid";
+  label: string;
+  color: string;
+  dashed: boolean;
+}
+
+export const DERIVATION_STYLES: Record<string, DerivationStyle> = {
+  explicit: { id: "explicit", label: "Explicit (metadata)", color: "#475569", dashed: false },
+  structural: { id: "structural", label: "Structural", color: "#94a3b8", dashed: false },
+  inferred: { id: "inferred", label: "Rule-inferred", color: "#d97706", dashed: true },
+  llm: { id: "llm", label: "LLM-inferred", color: "#7c3aed", dashed: true },
+  hybrid: { id: "hybrid", label: "Rule + LLM agree", color: "#0e9384", dashed: false },
+};
+
+export const DERIVATION_STYLE_LIST: DerivationStyle[] =
+  Object.values(DERIVATION_STYLES);
+
+/** Map a 0..1 confidence to a tier used for styling/labels. */
+export function confidenceTier(confidence: number): "high" | "medium" | "low" {
+  if (confidence >= 0.8) return "high";
+  if (confidence >= 0.5) return "medium";
+  return "low";
+}
 
 export const NODE_TYPE_LIST: NodeTypeDef[] = Object.values(NODE_TYPES);
 export const EDGE_TYPE_LIST: EdgeTypeDef[] = Object.values(EDGE_TYPES);

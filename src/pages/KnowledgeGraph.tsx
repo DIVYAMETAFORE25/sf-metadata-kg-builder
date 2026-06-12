@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Network,
@@ -8,6 +8,10 @@ import {
   X,
   Sparkles,
   RotateCcw,
+  Loader2,
+  AlertCircle,
+  Brain,
+  Info,
 } from "lucide-react";
 import AppLayout, { PageHeader } from "@/components/layout/AppLayout";
 import { Badge, Button, Card, EmptyState, StatTile } from "@/components/ui";
@@ -16,11 +20,16 @@ import { usePipeline } from "@/store/PipelineContext";
 import { downloadJson, formatNumber, cn } from "@/lib/utils";
 import {
   buildKnowledgeGraph,
+  mergeLlmRelationships,
   NODE_TYPE_LIST,
   NODE_TYPES,
+  DERIVATION_STYLES,
+  DERIVATION_STYLE_LIST,
   type BuildGraphOptions,
   type NodeTypeId,
+  type LlmRelationship,
 } from "@/lib/graph";
+import { enrichGraph, getLlmStatus, type LlmStatus } from "@/lib/llm/client";
 
 const FILTER_OPTIONS: { id: NodeTypeId; key: keyof BuildGraphOptions }[] = [
   { id: "Field", key: "includeFields" },
@@ -29,6 +38,10 @@ const FILTER_OPTIONS: { id: NodeTypeId; key: keyof BuildGraphOptions }[] = [
   { id: "ApexClass", key: "includeApex" },
   { id: "PermissionSet", key: "includeSecurity" },
 ];
+
+function pct(value: number): string {
+  return `${Math.round(value * 100)}%`;
+}
 
 export default function KnowledgeGraph() {
   const navigate = useNavigate();
@@ -44,10 +57,29 @@ export default function KnowledgeGraph() {
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
+  // LLM enrichment state.
+  const [llmStatus, setLlmStatus] = useState<LlmStatus | null>(null);
+  const [llmRelationships, setLlmRelationships] = useState<LlmRelationship[]>([]);
+  const [enriching, setEnriching] = useState(false);
+  const [enrichError, setEnrichError] = useState<string | null>(null);
+  const [enrichInfo, setEnrichInfo] = useState<string | null>(null);
+
+  useEffect(() => {
+    getLlmStatus().then(setLlmStatus);
+  }, []);
+
+  // Rule-built base graph.
+  const base = useMemo(
+    () => (metadata ? buildKnowledgeGraph(metadata, options) : null),
+    [metadata, options]
+  );
+
+  // Hybrid graph: base graph with LLM relationships merged in (if any).
   const graph = useMemo(() => {
-    if (!metadata) return null;
-    return buildKnowledgeGraph(metadata, options);
-  }, [metadata, options]);
+    if (!base) return null;
+    if (!llmRelationships.length) return base;
+    return mergeLlmRelationships(base, llmRelationships);
+  }, [base, llmRelationships]);
 
   const filtered = useMemo(() => {
     if (!graph) return { nodes: [], edges: [] };
@@ -76,13 +108,13 @@ export default function KnowledgeGraph() {
     );
   }, [graph, selectedId]);
 
-  if (status !== "ready" || !metadata || !graph) {
+  if (status !== "ready" || !metadata || !graph || !base) {
     return (
       <AppLayout>
         <PageHeader
           eyebrow="Stage 05 · Knowledge Graph"
           title="Knowledge Graph Generator"
-          description="Builds typed nodes and relationships from the parsed metadata and renders them as an interactive graph."
+          description="Builds typed nodes and relationships from the parsed metadata using ontology rules plus optional LLM enrichment."
         />
         <EmptyState
           icon={Network}
@@ -108,17 +140,45 @@ export default function KnowledgeGraph() {
       return next;
     });
 
+  const runEnrich = async () => {
+    if (!metadata || !base) return;
+    setEnriching(true);
+    setEnrichError(null);
+    setEnrichInfo(null);
+    try {
+      const result = await enrichGraph(metadata, base);
+      setLlmRelationships(result.relationships);
+      setEnrichInfo(
+        `${result.relationships.length} business relationships from ${result.model}.`
+      );
+    } catch (e) {
+      setEnrichError((e as Error).message);
+    } finally {
+      setEnriching(false);
+    }
+  };
+
+  const clearEnrich = () => {
+    setLlmRelationships([]);
+    setEnrichInfo(null);
+    setEnrichError(null);
+  };
+
+  const configured = llmStatus?.llmConfigured ?? false;
+  const enriched = graph.stats.enriched;
+  const aiLinks = graph.stats.llmEdgeCount + graph.stats.hybridEdgeCount;
+
   return (
     <AppLayout>
       <PageHeader
         eyebrow="Stage 05 · Knowledge Graph"
         title="Knowledge Graph"
-        description={`Ontology-typed graph generated from ${
+        description={`Hybrid graph from ${
           bundleName ?? "the parsed bundle"
-        }.`}
+        } — ontology rules${enriched ? " + LLM business logic" : ""}.`}
         actions={
           <>
-            <Badge tone="brand">
+            <Badge tone={enriched ? "success" : "brand"}>
               <Sparkles size={12} /> Builder v{graph.stats.builderVersion}
             </Badge>
             <Button
@@ -133,9 +193,68 @@ export default function KnowledgeGraph() {
             >
               Export
             </Button>
+            <Button
+              icon={enriching ? undefined : Brain}
+              onClick={runEnrich}
+              disabled={!configured || enriching}
+              title={
+                configured
+                  ? "Enrich the graph with LLM-inferred business relationships"
+                  : "Add OPENAI_API_KEY to .env and restart the API to enable this"
+              }
+            >
+              {enriching ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" /> Analyzing…
+                </>
+              ) : enriched ? (
+                "Re-run AI"
+              ) : (
+                "Enhance with AI"
+              )}
+            </Button>
           </>
         }
       />
+
+      {/* LLM status / result banners */}
+      {!configured && llmStatus && (
+        <div className="mb-4 flex items-start gap-3 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600">
+          <Info size={18} className="mt-0.5 shrink-0 text-gray-400" />
+          <div>
+            <p className="font-semibold text-gray-700">
+              AI enrichment is off — showing the rules-only graph.
+            </p>
+            <p className="mt-0.5">
+              Add <code className="font-mono text-xs">OPENAI_API_KEY</code> to your{" "}
+              <code className="font-mono text-xs">.env</code> file and restart the
+              API service to enable LLM business-logic inference.
+            </p>
+          </div>
+        </div>
+      )}
+      {enrichError && (
+        <div className="mb-4 flex items-start gap-3 rounded-xl border border-error-200 bg-error-50 px-4 py-3 text-sm text-error-700">
+          <AlertCircle size={18} className="mt-0.5 shrink-0" />
+          <div>
+            <p className="font-semibold">AI enrichment failed</p>
+            <p className="mt-0.5 text-error-600">{enrichError}</p>
+          </div>
+        </div>
+      )}
+      {enrichInfo && !enrichError && (
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-success-200 bg-success-50 px-4 py-3 text-sm text-success-700">
+          <span className="flex items-center gap-2 font-medium">
+            <Sparkles size={16} /> {enrichInfo}
+          </span>
+          <button
+            onClick={clearEnrich}
+            className="text-xs font-semibold text-success-700 underline-offset-2 hover:underline"
+          >
+            Clear AI links
+          </button>
+        </div>
+      )}
 
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatTile
@@ -153,16 +272,16 @@ export default function KnowledgeGraph() {
           caption={`${graph.stats.edgeCount} total`}
         />
         <StatTile
-          code="INFERRED"
-          value={formatNumber(graph.stats.inferredEdgeCount)}
-          label="Inferred links"
-          caption="Lower confidence"
+          code="CONFIDENCE"
+          value={pct(graph.stats.avgConfidence)}
+          label="Avg confidence"
+          caption="Across all edges"
         />
         <StatTile
-          code="LABELS"
-          value={formatNumber(Object.keys(graph.stats.nodesByType).length)}
-          label="Node types"
-          caption="Ontology labels"
+          code="AI LINKS"
+          value={formatNumber(aiLinks)}
+          label="LLM-derived"
+          caption={`${graph.stats.hybridEdgeCount} confirmed · ${graph.stats.llmEdgeCount} new`}
         />
       </div>
 
@@ -201,6 +320,29 @@ export default function KnowledgeGraph() {
               );
             })}
           </div>
+        </div>
+
+        {/* Edge source / confidence legend */}
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-gray-100 pt-3">
+          <span className="text-[10px] font-bold uppercase tracking-wide text-gray-400">
+            Edge source
+          </span>
+          {DERIVATION_STYLE_LIST.map((d) => (
+            <span key={d.id} className="flex items-center gap-1.5 text-xs text-gray-600">
+              <svg width="22" height="6" className="shrink-0">
+                <line
+                  x1="0"
+                  y1="3"
+                  x2="22"
+                  y2="3"
+                  stroke={d.color}
+                  strokeWidth="2"
+                  strokeDasharray={d.dashed ? "4 3" : undefined}
+                />
+              </svg>
+              {d.label}
+            </span>
+          ))}
         </div>
       </Card>
 
@@ -300,29 +442,56 @@ export default function KnowledgeGraph() {
               <div className="mt-4 text-[10px] font-bold uppercase tracking-wide text-gray-400">
                 Relationships ({selectedEdges.length})
               </div>
-              <div className="mt-2 space-y-1.5 overflow-y-auto">
+              <div className="mt-2 space-y-2 overflow-y-auto">
                 {selectedEdges.map((e) => {
                   const outgoing = e.source === selectedId;
                   const other = outgoing ? e.target : e.source;
+                  const style = DERIVATION_STYLES[e.derivation];
                   return (
-                    <button
+                    <div
                       key={e.id}
-                      onClick={() => setSelectedId(other)}
-                      className="flex w-full items-center gap-2 rounded-lg border border-gray-100 bg-gray-50 px-2.5 py-1.5 text-left text-xs hover:border-brand-200 hover:bg-brand-50/40"
+                      className="rounded-lg border border-gray-100 bg-gray-50 px-2.5 py-2"
                     >
-                      <span className="text-gray-400">{outgoing ? "→" : "←"}</span>
-                      <span className="font-mono text-[10px] text-brand-700">
-                        {e.caption}
-                      </span>
-                      <span className="ml-auto truncate text-gray-600">
-                        {other.replace(/^[a-z]+:/i, "")}
-                      </span>
-                      {e.derivation === "inferred" && (
-                        <span className="text-[9px] text-amber-500">
-                          {Math.round(e.confidence * 100)}%
+                      <button
+                        onClick={() => setSelectedId(other)}
+                        className="flex w-full items-center gap-2 text-left text-xs"
+                      >
+                        <span className="text-gray-400">{outgoing ? "→" : "←"}</span>
+                        <span className="font-mono text-[10px] text-brand-700">
+                          {e.caption}
                         </span>
+                        <span className="ml-auto truncate text-gray-600">
+                          {other.replace(/^[a-z]+:/i, "")}
+                        </span>
+                      </button>
+
+                      {/* Confidence bar + source */}
+                      <div className="mt-1.5 flex items-center gap-2">
+                        <span
+                          className="inline-block h-2 w-2 rounded-full"
+                          style={{ background: style?.color }}
+                          title={style?.label}
+                        />
+                        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-gray-200">
+                          <div
+                            className="h-full rounded-full"
+                            style={{
+                              width: pct(e.confidence),
+                              background: style?.color,
+                            }}
+                          />
+                        </div>
+                        <span className="w-9 text-right text-[10px] font-semibold text-gray-500">
+                          {pct(e.confidence)}
+                        </span>
+                      </div>
+
+                      {(e.rationale || e.evidence) && (
+                        <p className="mt-1.5 text-[11px] leading-snug text-gray-500">
+                          {e.rationale ?? e.evidence}
+                        </p>
                       )}
-                    </button>
+                    </div>
                   );
                 })}
               </div>
@@ -336,7 +505,7 @@ export default function KnowledgeGraph() {
                 Select a node
               </p>
               <p className="mt-1 text-xs text-gray-400">
-                Click any node to inspect its properties and relationships.
+                Click any node to inspect its properties and scored relationships.
               </p>
               {(query || hiddenTypes.size > 0) && (
                 <Button

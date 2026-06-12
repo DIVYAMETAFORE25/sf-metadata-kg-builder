@@ -332,17 +332,23 @@ export function buildKnowledgeGraph(
   return { nodes, edges, stats: computeStats(nodes, edges) };
 }
 
-function computeStats(
+export function computeStats(
   nodes: GraphNode[],
   edges: GraphEdge[]
 ): KnowledgeGraph["stats"] {
   const nodesByType = {} as Record<NodeTypeId, number>;
   const edgesByType = {} as Record<EdgeTypeId, number>;
   let inferredEdgeCount = 0;
+  let llmEdgeCount = 0;
+  let hybridEdgeCount = 0;
+  let confidenceSum = 0;
   for (const n of nodes) nodesByType[n.type] = (nodesByType[n.type] ?? 0) + 1;
   for (const e of edges) {
     edgesByType[e.type] = (edgesByType[e.type] ?? 0) + 1;
     if (e.derivation === "inferred") inferredEdgeCount += 1;
+    if (e.derivation === "llm") llmEdgeCount += 1;
+    if (e.derivation === "hybrid") hybridEdgeCount += 1;
+    confidenceSum += e.confidence;
   }
   return {
     nodeCount: nodes.length,
@@ -350,6 +356,10 @@ function computeStats(
     nodesByType,
     edgesByType,
     inferredEdgeCount,
+    llmEdgeCount,
+    hybridEdgeCount,
+    avgConfidence: edges.length ? Number((confidenceSum / edges.length).toFixed(2)) : 0,
+    enriched: llmEdgeCount > 0 || hybridEdgeCount > 0,
     generatedAt: new Date().toISOString(),
     builderVersion: GRAPH_BUILDER_VERSION,
   };
